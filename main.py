@@ -1,17 +1,81 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from concurrent.futures import ThreadPoolExecutor
-import asyncio
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+import re
+import os
 from scraper import run_scrape
+import csv
+import io
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-executor = ThreadPoolExecutor(max_workers=2)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+async def root():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+NICHE_MAP = {
+    "home": ["clean","cleaning","brush","drain","mold","scrub","scrubber","kitchen","bathroom","toilet","sink","tile","grout","storage","organizer","dust","odor","stain","spray","filter","strainer","repair","zipper","gap","window","fridge","lint","fresh","wipe","sponge","squeegee","plunger","clog","pipe","vent","curtain","shelf","rack","hook","hanger","mat","rug","cushion","pillow","blanket","towel","laundry","detergent","fabric","iron","vacuum","mop","broom","bucket"],
+    "beauty": ["skin","face","hair","lip","nail","serum","cream","mask","glow","beauty","makeup","moisturizer","toner","cleanser","exfoliant","sunscreen","foundation","concealer","blush","eyeshadow","mascara","eyeliner","brow","lash","curl","straighten","dye","shampoo","conditioner","scalp","pore","acne","wrinkle","anti-aging","collagen","vitamin","retinol","hyaluronic","spf","derma","gua sha","jade","roller","microneedle","led","red light","facial","peel","scrub"],
+    "fashion": ["shirt","dress","bag","shoe","jacket","pants","wear","fashion","cloth","clothing","outfit","style","tshirt","hoodie","sweater","coat","skirt","shorts","jeans","legging","sock","underwear","bra","lingerie","swimsuit","bikini","hat","cap","beanie","scarf","glove","belt","wallet","purse","handbag","backpack","tote","sneaker","boot","sandal","heel","loafer","slipper","watch","jewelry","necklace","bracelet","ring","earring","sunglasses"],
+    "fitness": ["gym","workout","muscle","protein","fitness","yoga","stretch","band","weight","dumbbell","barbell","kettlebell","resistance","pull-up","push-up","squat","plank","cardio","hiit","treadmill","bike","rowing","jump rope","foam roller","massage gun","recovery","supplement","creatine","bcaa","pre-workout","shaker","bottle","mat","glove","strap","belt","knee","ankle","wrist","support","brace","compression","posture","back","spine","core"],
+    "pet": ["dog","cat","pet","paw","fur","leash","collar","treat","feeder","bowl","bed","crate","cage","toy","chew","scratch","litter","grooming","brush","nail","shampoo","flea","tick","dewormer","vitamin","supplement","harness","carrier","stroller","gate","fence","training","clicker","whistle","fish","bird","hamster","rabbit","reptile","aquarium","terrarium"],
+    "tech": ["phone","cable","charger","usb","gadget","tech","screen","stand","mount","case","cover","protector","earphone","headphone","speaker","bluetooth","wifi","router","keyboard","mouse","monitor","laptop","tablet","ipad","iphone","android","samsung","apple","gaming","controller","webcam","microphone","ring light","tripod","drone","camera","lens","memory","storage","ssd","hub","adapter","converter","power bank","solar"],
+    "baby": ["baby","infant","toddler","diaper","stroller","pacifier","bottle","nipple","formula","breastfeed","pump","nursing","swaddle","onesie","romper","bib","teether","rattle","mobile","monitor","gate","safety","car seat","booster","high chair","crib","bassinet","playpen","toy","block","puzzle","book","bath","lotion","powder","wipe","thermometer","nasal","humidifier"],
+    "outdoor": ["garden","plant","outdoor","camping","hiking","tent","seed","soil","pot","planter","watering","hose","sprinkler","fertilizer","pesticide","weed","lawn","mower","trimmer","rake","shovel","glove","boot","backpack","sleeping bag","hammock","lantern","flashlight","fire","grill","bbq","cooler","fishing","hunting","archery","climbing","kayak","paddle","surf","ski","snowboard","bike","scooter","skateboard"],
+    "health": ["dental","teeth","tooth","denture","retainer","whitening","floss","mouthwash","breath","gum","braces","aligner","night guard","tongue","oral","health","medical","pain","relief","joint","knee","back","neck","shoulder","posture","sleep","snore","apnea","blood pressure","glucose","diabetes","heart","cholesterol","immune","probiotic","prebiotic","digestive","gut","liver","kidney","detox","cleanse","weight loss","diet","keto","intermittent","fasting","thyroid","hormone","menopause","fertility","pregnancy","prenatal","postnatal"],
+}
+
+NICHE_ICONS = {
+    "home": "🏠", "beauty": "💄", "fashion": "👗", "fitness": "💪",
+    "pet": "🐾", "tech": "📱", "baby": "👶", "outdoor": "🌿",
+    "health": "🏥", "other": "🛍️",
+}
+
+def detect_niche(product, domain, slug, page="", raw_text=""):
+    text = f"{product} {domain} {slug} {page} {raw_text[:200]}".lower()
+    scores = {}
+    for niche, words in NICHE_MAP.items():
+        score = sum(1 for w in words if w in text)
+        if score > 0:
+            scores[niche] = score
+    if not scores:
+        return "other"
+    return max(scores, key=scores.get)
+
+def is_shopify(domain, raw_text=""):
+    d = (domain or "").lower()
+    if d.endswith(".myshopify.com"):
+        return True
+    if "shopify" in d:
+        return True
+    # Common Shopify store patterns
+    if re.search(r"\.(com|co|store|shop)$", d):
+        return True
+    return False
+
+def get_better_product_name(product, slug, domain, page, raw_text=""):
+    """Try to get a better product name from available data"""
+    # Slug is usually the best source
+    if slug and slug not in {"none","unknown","products","product","collections","shop","store","all","home","index","homepage"}:
+        name = slug.replace("-"," ").replace("_"," ").strip()
+        if len(name) > 3 and not name.isdigit():
+            return name
+    # Product from URL
+    if product and product not in {"unknown","none"}:
+        return product
+    # Try to extract from raw_text (ad headline)
+    if raw_text:
+        lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+        for line in lines[:5]:
+            if 5 < len(line) < 60 and not any(x in line.lower() for x in ["library id","id thư viện","started running","ngày bắt đầu","được tài trợ","sponsored","see ad","xem chi"]):
+                return line
+    return product or "unknown"
 
 @app.post("/scan")
 async def scan(
@@ -20,29 +84,162 @@ async def scan(
     scroll_rounds: int = Form(6),
     top_n: int = Form(20),
     min_score: int = Form(0),
+    niche_filter: str = Form("all"),
+    shopify_only: str = Form(None),
 ):
-    kw_list = [k.strip() for k in keywords.strip().splitlines() if k.strip()]
+    try:
+        kw_list = [k.strip() for k in keywords.strip().splitlines() if k.strip()]
+        if not kw_list:
+            return JSONResponse({"ok": False, "error": "No keywords provided"})
 
-    def do_scrape():
-        return run_scrape(
-            keywords=kw_list,
-            country=country,
-            scroll_rounds=scroll_rounds,
+        loop = asyncio.get_event_loop()
+        winners, all_ads = await loop.run_in_executor(
+            _executor,
+            lambda: run_scrape(keywords=kw_list, country=country, scroll_rounds=scroll_rounds)
         )
 
-    try:
-        loop = asyncio.get_event_loop()
-        winners, all_ads = await loop.run_in_executor(executor, do_scrape)
+        # Build lookup for raw ads by domain
+        domain_to_ads = {}
+        for ad in all_ads:
+            d = ad.get("domain","")
+            if d not in domain_to_ads:
+                domain_to_ads[d] = []
+            domain_to_ads[d].append(ad)
 
-        filtered = [w for w in winners if w["win_score"] >= min_score][:top_n]
+        result_list = []
+        for w in winners:
+            score = w.get("win_score", 0)
+            label = w.get("label", "weak")
 
-        # attach thumbnail
-        for w in filtered:
-            sig = w.get("signature", "")
-            media = [a.get("media_url", "") for a in all_ads
-                     if a.get("product_signature") == sig and a.get("media_url")]
-            w["thumb"] = media[0] if media else ""
+            if score < min_score:
+                continue
 
-        return {"ok": True, "winners": filtered, "total": len(winners)}
+            domain = w.get("sample_domain","")
+            slug = w.get("sample_slug","")
+            raw_ads = domain_to_ads.get(domain, [])
+            raw_text = raw_ads[0].get("raw_text","") if raw_ads else ""
+            page = w.get("pages",[""])[0] if w.get("pages") else ""
+
+            # Better product name
+            product = get_better_product_name(
+                w.get("product",""),
+                slug,
+                domain,
+                page,
+                raw_text
+            )
+
+            # Better niche detection
+            niche = detect_niche(product, domain, slug, page, raw_text)
+            shopify = is_shopify(domain)
+
+            if niche_filter != "all" and niche != niche_filter:
+                continue
+            if shopify_only == "true" and not shopify:
+                continue
+
+            # Ad link
+            ad_ids = w.get("ad_ids", [])
+            ad_link = f"https://www.facebook.com/ads/library/?id={ad_ids[0]}" if ad_ids else ""
+
+            # Thumbnail
+            thumb = ""
+            for ad in raw_ads:
+                if ad.get("thumb_path"):
+                    thumb = ad["thumb_path"]
+                    break
+
+            if not thumb:
+                for ad in raw_ads:
+                    if ad.get("media_url"):
+                        thumb = ad["media_url"]
+                        break
+            # Ad copy preview (first meaningful line)
+            ad_copy = ""
+            if raw_text:
+                lines = [l.strip() for l in raw_text.split("\n") if l.strip() and len(l.strip()) > 20]
+                for line in lines:
+                    if not any(x in line.lower() for x in ["library id","id thư viện","started running","ngày bắt đầu","được tài trợ","sponsored"]):
+                        ad_copy = line[:150]
+                    break
+
+            result_list.append({
+                "product": product.title(),
+                "label": label,
+                "win_score": score,
+                "ads_count": w.get("ads_count", 0),
+                "max_days": w.get("max_days", 0),
+                "median_days": w.get("median_days", 0),
+                "pages_count": w.get("pages_count", 0),
+                "creative_count": w.get("creative_count", 0),
+                "evidence_points": w.get("evidence_points", 0),
+                "confidence": w.get("confidence", "low"),
+                "sample_url": w.get("sample_url", ""),
+                "sample_domain": domain,
+                "niche": niche,
+                "niche_icon": NICHE_ICONS.get(niche, "🛍️"),
+                "shopify": shopify,
+                "ad_link": ad_link,
+                "thumb": thumb,
+                "ad_copy": ad_copy,
+                "keywords": w.get("keywords", []),
+                "reasons": w.get("reasons", []),
+                "ads_signal": w.get("ads_signal", 0),
+                "durability_signal": w.get("durability_signal", 0),
+                "page_signal": w.get("page_signal", 0),
+                "creative_signal": w.get("creative_signal", 0),
+            })
+
+        result_list = result_list[:top_n]
+
+        return JSONResponse({
+            "ok": True,
+            "total": len(winners),
+            "winners": result_list,
+        })
+
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        import traceback
+        return JSONResponse({"ok": False, "error": str(e), "trace": traceback.format_exc()})
+
+
+@app.post("/export-csv")
+async def export_csv(
+    keywords: str = Form(...),
+    country: str = Form("US"),
+    scroll_rounds: int = Form(6),
+    top_n: int = Form(20),
+    min_score: int = Form(0),
+):
+    """Export results as CSV"""
+    from fastapi.responses import StreamingResponse
+    try:
+        kw_list = [k.strip() for k in keywords.strip().splitlines() if k.strip()]
+        winners, all_ads = run_scrape(keywords=kw_list, country=country, scroll_rounds=scroll_rounds)
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Rank","Product","Label","Score","Ads","Days","Pages","Creatives","Domain","Store URL","Ad Link","Niche","Shopify"])
+
+        for i, w in enumerate(winners[:top_n], 1):
+            if w.get("win_score",0) < min_score:
+                continue
+            ad_ids = w.get("ad_ids",[])
+            ad_link = f"https://www.facebook.com/ads/library/?id={ad_ids[0]}" if ad_ids else ""
+            writer.writerow([
+                i, w.get("product",""), w.get("label",""), w.get("win_score",0),
+                w.get("ads_count",0), w.get("max_days",0), w.get("pages_count",0),
+                w.get("creative_count",0), w.get("sample_domain",""),
+                w.get("sample_url",""), ad_link,
+                detect_niche(w.get("product",""), w.get("sample_domain",""), w.get("sample_slug","")),
+                is_shopify(w.get("sample_domain","")),
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=winnerspy_results.csv"}
+        )
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
