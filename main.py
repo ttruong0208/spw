@@ -10,7 +10,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 _executor = ThreadPoolExecutor(max_workers=2)
-
+os.makedirs("static/thumbs", exist_ok=True)
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WinnerSpy — Find Winning Products</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #f5f7fb;
+    color: #1f2937;
+    font-family: 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  header {
+    background: linear-gradient(135deg, #ffffff, #eef2ff);
+    padding: 22px 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #dbe3f0;
+  }
+
+  header h1 {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #24324a;
+  }
+
+  header span {
+    background: linear-gradient(90deg, #5b6cff, #43c6ac);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .container {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 28px 20px 40px;
+  }
+
+  .panel,
+  .stat,
+  .card {
+    background: #ffffff;
+    border: 1px solid #d9e2ef;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(31, 41, 55, 0.05);
+  }
+
+  .panel {
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .panel h2 {
+    font-size: 0.95rem;
+    color: #6b7280;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .form-group.full {
+    grid-column: 1 / -1;
+  }
+
+  label {
+    font-size: 0.8rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  textarea,
+  input,
+  select {
+    background: #ffffff;
+    border: 1px solid #cfd8e3;
+    border-radius: 10px;
+    color: #111827;
+    padding: 11px 14px;
+    font-size: 0.95rem;
+    width: 100%;
+    outline: none;
+    transition: border 0.2s, box-shadow 0.2s;
+  }
+
+  textarea:focus,
+  input:focus,
+  select:focus {
+    border-color: #6675ff;
+    box-shadow: 0 0 0 4px rgba(102, 117, 255, 0.12);
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .checkbox-row input {
+    width: auto;
+  }
+
+  .btn {
+    background: linear-gradient(135deg, #6376ff, #4cc9b0);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 32px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.2s, box-shadow 0.2s;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: 0 8px 20px rgba(99, 118, 255, 0.18);
+  }
+
+  .btn:hover {
+    opacity: 0.96;
+    transform: translateY(-1px);
+  }
+
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .stats-bar {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    padding: 14px 22px;
+    text-align: center;
+    min-width: 150px;
+  }
+
+  .stat .num {
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: #5b6cff;
+  }
+
+  .stat .lbl {
+    font-size: 0.78rem;
+    color: #7b8797;
+    margin-top: 2px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 22px;
+  }
+
+  .card {
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: #c5d2e6;
+    box-shadow: 0 18px 42px rgba(31, 41, 55, 0.08);
+  }
+
+  .card.winner {
+    border-color: #d8c36a;
+  }
+
+  .card.watchlist {
+    border-color: #ead28a;
+  }
+
+  .card-thumb {
+    width: 100%;
+    height: 210px;
+    object-fit: contain;
+    object-position: center;
+    background: #f4f6fb;
+    display: block;
+    padding: 10px;
+    border-bottom: 1px solid #edf1f7;
+  }
+
+  .card-thumb-placeholder {
+    width: 100%;
+    height: 210px;
+    background: linear-gradient(135deg, #f8fafc, #eef2f7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    border-bottom: 1px solid #edf1f7;
+  }
+
+  .card-body {
+    padding: 18px;
+  }
+
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .badge {
+    font-size: 0.72rem;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .badge.winner {
+    background: #f4d98b;
+    color: #6f4b00;
+    border: 1px solid #e9c96d;
+  }
+
+  .badge.watchlist {
+    background: #f8df9e;
+    color: #715100;
+    border: 1px solid #ebcb77;
+  }
+
+  .badge.testing {
+    background: #e6e9ff;
+    color: #4b57c7;
+    border: 1px solid #cfd5ff;
+  }
+
+  .badge.weak {
+    background: #ffe2e2;
+    color: #c84f4f;
+    border: 1px solid #f4b4b4;
+  }
+
+  .badge.shopify {
+    background: #e8f6d9;
+    color: #5d8d20;
+    border: 1px solid #cde9aa;
+  }
+
+  .card-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1a2438;
+    margin-bottom: 10px;
+    text-transform: capitalize;
+    line-height: 1.35;
+  }
+
+  .card-copy {
+    font-size: 0.82rem;
+    color: #6b7280;
+    margin-bottom: 10px;
+    line-height: 1.45;
+    max-height: 54px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+
+  .score-bar {
+    background: #e7ecf3;
+    border-radius: 999px;
+    height: 7px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+
+  .score-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #6c63ff, #62d0c0);
+    transition: width 0.5s;
+  }
+
+  .card-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .meta-item {
+    font-size: 0.84rem;
+    color: #6b7280;
+  }
+
+  .meta-item span {
+    color: #24324a;
+    font-weight: 700;
+  }
+
+  .card-links {
+    display: flex;
+    gap: 10px;
+  }
+
+  .card-links a {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: opacity 0.2s, transform 0.15s;
+  }
+
+  .card-links a:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+
+  .link-ad {
+    background: #eef0ff;
+    color: #5060d8;
+    border: 1px solid #d8ddff;
+  }
+
+  .link-store {
+    background: #e8f7f5;
+    color: #1e8f7e;
+    border: 1px solid #cdece7;
+  }
+
+  .loading {
+    text-align: center;
+    padding: 60px;
+    color: #6b7280;
+  }
+
+  .loading .spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #dbe3f0;
+    border-top-color: #6c63ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .error {
+    background: #fff1f1;
+    border: 1px solid #f3c0c0;
+    border-radius: 12px;
+    padding: 16px;
+    color: #c84f4f;
+    margin-bottom: 20px;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 60px;
+    color: #6b7280;
+    font-size: 1.1rem;
+  }
+
+  #results {
+    display: none;
+  }
+
+  .sort-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .sort-bar label {
+    font-size: 0.82rem;
+    color: #6b7280;
+  }
+
+  .sort-bar select {
+    background: #ffffff;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    color: #111827;
+    padding: 7px 10px;
+    font-size: 0.9rem;
+    outline: none;
+  }
+
+  @media (max-width: 768px) {
+    .form-grid {
+      grid-template-columns: 1fr;
+    }
+
+    header {
+      padding: 18px 20px;
+    }
+
+    .container {
+      padding: 20px 14px 30px;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Winner<span>Spy</span> 🔍</h1>
+</header>
+<div class="container">
+  <div class="panel">
+    <h2>⚙️ Scan Settings</h2>
+    <form id="scanForm">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Keywords (one per line)</label>
+          <textarea name="keywords" placeholder="cleaning brush&#10;drain cleaner&#10;pet hair remover">cleaning brush
+drain cleaner
+pet hair remover</textarea>
+        </div>
+        <div class="form-group">
+          <label>Country</label>
+          <select name="country">
+            <option value="US">🇺🇸 United States</option>
+            <option value="GB">🇬🇧 United Kingdom</option>
+            <option value="AU">🇦🇺 Australia</option>
+            <option value="CA">🇨🇦 Canada</option>
+            <option value="VN">🇻🇳 Vietnam</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Scroll Depth</label>
+          <input type="number" name="scroll_rounds" value="6" min="1" max="20"/>
+        </div>
+        <div class="form-group">
+          <label>Top N Results</label>
+          <input type="number" name="top_n" value="20" min="1" max="100"/>
+        </div>
+        <div class="form-group">
+          <label>Min Win Score</label>
+          <input type="number" name="min_score" value="0" min="0"/>
+        </div>
+        <div class="form-group">
+          <label>Niche Filter</label>
+          <select name="niche_filter">
+            <option value="all">All Niches</option>
+            <option value="home">🏠 Home</option>
+            <option value="beauty">💄 Beauty</option>
+            <option value="fashion">👗 Fashion</option>
+            <option value="fitness">💪 Fitness</option>
+            <option value="pet">🐾 Pet</option>
+            <option value="tech">📱 Tech</option>
+            <option value="baby">👶 Baby</option>
+            <option value="outdoor">🌿 Outdoor</option>
+            <option value="health">🏥 Health</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Shopify Only</label>
+          <div class="checkbox-row">
+            <input type="checkbox" name="shopify_only" id="shopify_only"/>
+            <label for="shopify_only" style="text-transform:none;font-size:0.9rem;">Show only Shopify stores</label>
+          </div>
+        </div>
+      </div>
+      <button type="submit" class="btn" id="scanBtn">🚀 Start Scan</button>
+      <button type="button" class="btn" id="exportBtn" style="background:linear-gradient(135deg,#2d2d4e,#3a3a5e);margin-top:8px;display:none">📥 Export CSV</button>
+    </form>
+  </div>
+
+  <div id="results">
+    <div class="stats-bar" id="statsBar"></div>
+    <div id="errorBox"></div>
+    <div class="sort-bar">
+      <label>Sort by:</label>
+      <select id="sortSelect">
+        <option value="score">🏆 Win Score</option>
+        <option value="days">📅 Days Running</option>
+        <option value="ads">📢 Ads Count</option>
+        <option value="creatives">🎨 Creatives</option>
+      </select>
+    </div>
+    <div class="cards" id="cardsGrid"></div>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById("scanForm");
+const btn = document.getElementById("scanBtn");
+const results = document.getElementById("results");
+const statsBar = document.getElementById("statsBar");
+const cardsGrid = document.getElementById("cardsGrid");
+const errorBox = document.getElementById("errorBox");
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  btn.textContent = "⏳ Scanning...";
+  results.style.display = "block";
+  statsBar.innerHTML = "";
+  errorBox.innerHTML = "";
+  cardsGrid.innerHTML = `<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><p>Scanning Facebook Ads Library...</p><p style="font-size:0.8rem;margin-top:8px;color:#666">This may take 2-5 minutes</p></div>`;
+
+  const fd = new FormData(form);
+  if (!document.getElementById("shopify_only").checked) fd.delete("shopify_only");
+  else fd.set("shopify_only", "true");
+
+  try {
+    const res = await fetch("/scan", { method: "POST", body: fd });
+    const data = await res.json();
+
+    if (!data.ok) {
+      errorBox.innerHTML = `<div class="error">❌ Error: ${data.error}</div>`;
+      cardsGrid.innerHTML = "";
+    } else {
+      const winners = data.winners;
+      const winCount = winners.filter(w => w.label === "winner_candidate").length;
+      const watchCount = winners.filter(w => w.label === "watchlist").length;
+      const shopifyCount = winners.filter(w => w.shopify).length;
+
+      statsBar.innerHTML = `
+        <div class="stat"><div class="num">${data.total}</div><div class="lbl">Total Products</div></div>
+        <div class="stat"><div class="num" style="color:#48cfad">${winCount}</div><div class="lbl">🏆 Winners</div></div>
+        <div class="stat"><div class="num" style="color:#f7b731">${watchCount}</div><div class="lbl">👀 Watchlist</div></div>
+        <div class="stat"><div class="num" style="color:#96bf48">${shopifyCount}</div><div class="lbl">🛒 Shopify</div></div>
+        <div class="stat"><div class="num">${winners.length}</div><div class="lbl">Showing</div></div>
+      `;
+
+      lastResults = winners;
+      document.getElementById("exportBtn").style.display = "block";
+      renderCards(sortResults(winners));
+    }
+  } catch (err) {
+    errorBox.innerHTML = `<div class="error">❌ Network error: ${err.message}</div>`;
+    cardsGrid.innerHTML = "";
+  }
+
+  btn.disabled = false;
+  btn.textContent = "🚀 Start Scan";
+});
+
+function renderCard(w) {
+  const scoreMax = 40;
+  const scorePct = Math.min((w.win_score / scoreMax) * 100, 100);
+  const thumb = w.thumb
+    ? `<img class="card-thumb" src="${w.thumb}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="card-thumb-placeholder" style="display:none">${w.niche_icon}</div>`
+    : `<div class="card-thumb-placeholder">${w.niche_icon || "🛍️"}</div>`;
+
+  const shopifyBadge = w.shopify ? `<span class="badge shopify">✅ Shopify</span>` : "";
+  const adLink = w.ad_link ? `<a href="${w.ad_link}" target="_blank" class="link-ad">📢 View Ad</a>` : "";
+  const storeLink = w.sample_url ? `<a href="${w.sample_url}" target="_blank" class="link-store">🛒 Store</a>` : "";
+
+  return `
+  <div class="card ${w.label}">
+    ${thumb}
+    <div class="card-body">
+      <div class="card-top">
+        <span class="badge ${w.label}">${labelText(w.label)}</span>
+        <div style="display:flex;gap:4px">${shopifyBadge}<span style="font-size:1.1rem">${w.niche_icon || "🛍️"}</span></div>
+      </div>
+      <div class="card-title">${w.product}</div>
+      ${w.ad_copy ? `<div class="card-copy">${w.ad_copy}</div>` : ""}
+      <div class="score-bar"><div class="score-fill" style="width:${scorePct}%"></div></div>
+      <div class="card-meta">
+        <div class="meta-item">Score <span>${w.win_score}</span></div>
+        <div class="meta-item">Ads <span>${w.ads_count}</span></div>
+        <div class="meta-item">Days <span>${w.max_days}</span></div>
+        <div class="meta-item">Pages <span>${w.pages_count}</span></div>
+        <div class="meta-item">Creatives <span>${w.creative_count}</span></div>
+        <div class="meta-item">Niche <span>${w.niche}</span></div>
+      </div>
+      <div class="card-links">${adLink}${storeLink}</div>
+    </div>
+  </div>`;
+}
+
+function labelText(label) {
+  const map = { winner_candidate: "🏆 Winner", watchlist: "👀 Watchlist", testing: "🧪 Testing", weak: "💤 Weak" };
+  return map[label] || label;
+}
+
+let lastResults = [];
+
+document.getElementById("sortSelect").addEventListener("change", () => {
+  if (lastResults.length) renderCards(sortResults(lastResults));
+});
+
+function sortResults(data) {
+  const by = document.getElementById("sortSelect").value;
+  return [...data].sort((a, b) => {
+    if (by === "score") return b.win_score - a.win_score;
+    if (by === "days") return b.max_days - a.max_days;
+    if (by === "ads") return b.ads_count - a.ads_count;
+    if (by === "creatives") return b.creative_count - a.creative_count;
+    return 0;
+  });
+}
+
+function renderCards(data) {
+  cardsGrid.innerHTML = data.length
+    ? data.map(w => renderCard(w)).join("")
+    : `<div class="empty" style="grid-column:1/-1">😔 No products found. Try different keywords or lower the min score.</div>`;
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const fd = new FormData(form);
+  fetch("/export-csv", { method: "POST", body: fd })
+    .then(r => r.blob())
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "winnerspy_results.csv"; a.click();
+      URL.revokeObjectURL(url);
+    });
+});
+</script>
+</body>
+</html>
