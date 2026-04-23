@@ -648,12 +648,16 @@ document.getElementById("exportBtn").addEventListener("click", () => {
 });
 </script>
 <script>
+  const IS_OWNER = localStorage.getItem("is_owner") === "true";
+
   function getVisitorId() {
-    let visitorId = localStorage.getItem("visitor_id");
-    return visitorId || "";
+    return localStorage.getItem("visitor_id") || "";
   }
-  
+
   async function trackEvent(eventName, detail = "") {
+    console.log("trackEvent called:", eventName, "IS_OWNER =", IS_OWNER);
+    if (IS_OWNER) return;
+
     try {
       const res = await fetch("/track", {
         method: "POST",
@@ -667,8 +671,9 @@ document.getElementById("exportBtn").addEventListener("click", () => {
           detail: detail
         })
       });
-  
+
       const data = await res.json();
+
       if (data.visitor_id && !localStorage.getItem("visitor_id")) {
         localStorage.setItem("visitor_id", data.visitor_id);
       }
@@ -676,18 +681,18 @@ document.getElementById("exportBtn").addEventListener("click", () => {
       console.log("Tracking error:", err);
     }
   }
-  
+
   window.addEventListener("load", () => {
     trackEvent("page_view");
   });
-  
+
   form.addEventListener("submit", async () => {
     trackEvent("scan_submit", "User started scan");
   });
-  
+
   document.getElementById("exportBtn").addEventListener("click", () => {
     trackEvent("export_csv", "User clicked export");
   });
-  </script>
+</script>
 </body>
 </html>
