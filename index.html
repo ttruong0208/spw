@@ -647,5 +647,47 @@ document.getElementById("exportBtn").addEventListener("click", () => {
     });
 });
 </script>
+<script>
+  function getVisitorId() {
+    let visitorId = localStorage.getItem("visitor_id");
+    return visitorId || "";
+  }
+  
+  async function trackEvent(eventName, detail = "") {
+    try {
+      const res = await fetch("/track", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          visitor_id: getVisitorId(),
+          event: eventName,
+          page: window.location.pathname,
+          detail: detail
+        })
+      });
+  
+      const data = await res.json();
+      if (data.visitor_id && !localStorage.getItem("visitor_id")) {
+        localStorage.setItem("visitor_id", data.visitor_id);
+      }
+    } catch (err) {
+      console.log("Tracking error:", err);
+    }
+  }
+  
+  window.addEventListener("load", () => {
+    trackEvent("page_view");
+  });
+  
+  form.addEventListener("submit", async () => {
+    trackEvent("scan_submit", "User started scan");
+  });
+  
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    trackEvent("export_csv", "User clicked export");
+  });
+  </script>
 </body>
 </html>
