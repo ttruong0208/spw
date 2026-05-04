@@ -362,7 +362,7 @@ def run_scan_job(job_id, kw_list, country, scroll_rounds, top_n, min_score, nich
 async def scan(
     keywords: str = Form(...),
     country: str = Form("US"),
-    scroll_rounds: int = Form(6),
+    scroll_rounds: int = Form(3),
     top_n: int = Form(20),
     min_score: int = Form(0),
     niche_filter: str = Form("all"),
@@ -372,7 +372,7 @@ async def scan(
         kw_list = [k.strip() for k in keywords.strip().splitlines() if k.strip()]
         if not kw_list:
             return JSONResponse({"ok": False, "error": "No keywords provided"})
-
+        scroll_rounds = max(1, min(scroll_rounds, 8))
         job_id = str(uuid.uuid4())
         SCAN_JOBS[job_id] = {
             "status": "queued",
