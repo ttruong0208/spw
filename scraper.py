@@ -14,6 +14,8 @@ COUNTRY = "US"
 SCROLL_ROUNDS = 6
 TOP_N = 20
 DEBUG = False
+MAX_CARDS_PER_KEYWORD = int(os.getenv("MAX_CARDS_PER_KEYWORD", "25"))
+CAPTURE_CARD_SCREENSHOTS = os.getenv("CAPTURE_CARD_SCREENSHOTS", "false").lower() == "true"
 
 THUMB_DIR = "static/thumbs"
 os.makedirs(THUMB_DIR, exist_ok=True)
@@ -237,8 +239,8 @@ def scroll_ads(page, scroll_rounds=6):
     for i in range(scroll_rounds):
         page.mouse.wheel(0, 800)
         count = last
-        for _ in range(10):
-            time.sleep(0.5)
+        for _ in range(6):
+            time.sleep(0.35)
             count_en = page.locator("text=Library ID").count()
             count_vi = page.locator("text=ID thư viện").count()
             count = max(count_en, count_vi)
@@ -359,6 +361,8 @@ def extract_media_url(card):
 
 def take_card_screenshot(card, ad_id):
     """Screenshot the ad card and save to static/thumbs/"""
+    if not CAPTURE_CARD_SCREENSHOTS:
+        return ""
     try:
         path = os.path.join(THUMB_DIR, f"{ad_id}.png")
         card.screenshot(path=path, timeout=5000)
@@ -370,7 +374,7 @@ def scrape_ads(page, keyword, search_url, country="US"):
     cards = locate_cards(page)
     if not cards:
         return []
-    total = cards.count()
+    total = min(cards.count(), MAX_CARDS_PER_KEYWORD)
     ads_data = []
     seen_ids = set()
     for i in range(total):
@@ -693,7 +697,7 @@ def run_scrape(keywords: list, country: str = "US", scroll_rounds: int = 6, prog
             try:
                 url = build_search_url(keyword, country)
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(7)
+                time.sleep(3)
                 scroll_ads(page, scroll_rounds)
                 ads = scrape_ads(page, keyword, url, country)
                 all_ads.extend(ads)

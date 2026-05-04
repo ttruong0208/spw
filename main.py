@@ -372,7 +372,17 @@ async def scan(
         kw_list = [k.strip() for k in keywords.strip().splitlines() if k.strip()]
         if not kw_list:
             return JSONResponse({"ok": False, "error": "No keywords provided"})
+        kw_list = kw_list[:3]
         scroll_rounds = max(1, min(scroll_rounds, 8))
+        active_jobs = [
+            job for job in SCAN_JOBS.values()
+            if job.get("status") in {"queued", "running"}
+        ]
+        if len(active_jobs) >= 2:
+            return JSONResponse({
+                "ok": False,
+                "error": "Server is busy. Please wait for the current scan to finish, then try again."
+            }, status_code=429)
         job_id = str(uuid.uuid4())
         SCAN_JOBS[job_id] = {
             "status": "queued",
