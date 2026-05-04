@@ -6,7 +6,6 @@ import re
 import os
 import csv
 import io
-import asyncio
 import uuid
 import json
 from datetime import datetime
@@ -14,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from scraper import run_scrape
 
 _executor = ThreadPoolExecutor(max_workers=2)
+SCAN_JOBS = {}
 os.makedirs("static/thumbs", exist_ok=True)
 
 app = FastAPI()
@@ -245,6 +245,119 @@ def get_better_product_name(product, slug, domain, page, raw_text=""):
 
     return product or "unknown"
 
+def build_scan_result(winners, all_ads, top_n, min_score, niche_filter, shopify_only):
+    domain_to_ads = {}
+    for ad in all_ads:
+        d = ad.get("domain", "")
+        if d not in domain_to_ads:
+            domain_to_ads[d] = []
+        domain_to_ads[d].append(ad)
+
+    result_list = []
+    for w in winners:
+        score = w.get("win_score", 0)
+        label = w.get("label", "weak")
+
+        if score < min_score:
+            continue
+
+        domain = w.get("sample_domain", "")
+        slug = w.get("sample_slug", "")
+        raw_ads = domain_to_ads.get(domain, [])
+        raw_text = raw_ads[0].get("raw_text", "") if raw_ads else ""
+        page = w.get("pages", [""])[0] if w.get("pages") else ""
+
+        product = get_better_product_name(
+            w.get("product", ""),
+            slug,
+            domain,
+            page,
+            raw_text
+        )
+
+        niche = detect_niche(product, domain, slug, page, raw_text)
+        shopify = is_shopify(domain)
+
+        if niche_filter != "all" and niche != niche_filter:
+            continue
+        if shopify_only == "true" and not shopify:
+            continue
+
+        ad_ids = w.get("ad_ids", [])
+        ad_link = f"https://www.facebook.com/ads/library/?id={ad_ids[0]}" if ad_ids else ""
+
+        thumb = ""
+        for ad in raw_ads:
+            if ad.get("thumb_path"):
+                thumb = ad["thumb_path"]
+                break
+
+        if not thumb:
+            for ad in raw_ads:
+                if ad.get("media_url"):
+                    thumb = ad["media_url"]
+                    break
+
+        ad_copy = ""
+        if raw_text:
+            lines = [l.strip() for l in raw_text.split("\n") if l.strip() and len(l.strip()) > 20]
+            for line in lines:
+                if not any(x in line.lower() for x in ["library id","id thư viện","started running","ngày bắt đầu","được tài trợ","sponsored"]):
+                    ad_copy = line[:150]
+                    break
+
+        result_list.append({
+            "product": product.title(),
+            "label": label,
+            "win_score": score,
+            "ads_count": w.get("ads_count", 0),
+            "max_days": w.get("max_days", 0),
+            "median_days": w.get("median_days", 0),
+            "pages_count": w.get("pages_count", 0),
+            "creative_count": w.get("creative_count", 0),
+            "evidence_points": w.get("evidence_points", 0),
+            "confidence": w.get("confidence", "low"),
+            "sample_url": w.get("sample_url", ""),
+            "sample_domain": domain,
+            "niche": niche,
+            "niche_icon": NICHE_ICONS.get(niche, "🛍️"),
+            "shopify": shopify,
+            "ad_link": ad_link,
+            "thumb": thumb,
+            "ad_copy": ad_copy,
+            "keywords": w.get("keywords", []),
+            "reasons": w.get("reasons", []),
+            "ads_signal": w.get("ads_signal", 0),
+            "durability_signal": w.get("durability_signal", 0),
+            "page_signal": w.get("page_signal", 0),
+            "creative_signal": w.get("creative_signal", 0),
+        })
+
+    return {
+        "ok": True,
+        "total": len(winners),
+        "winners": result_list[:top_n],
+    }
+
+def run_scan_job(job_id, kw_list, country, scroll_rounds, top_n, min_score, niche_filter, shopify_only):
+    try:
+        SCAN_JOBS[job_id].update({"status": "running", "updated_at": datetime.utcnow().isoformat()})
+        winners, all_ads = run_scrape(keywords=kw_list, country=country, scroll_rounds=scroll_rounds)
+        result = build_scan_result(winners, all_ads, top_n, min_score, niche_filter, shopify_only)
+        SCAN_JOBS[job_id].update({
+            "status": "done",
+            "result": result,
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        import traceback
+        SCAN_JOBS[job_id].update({
+            "status": "error",
+            "error": str(e),
+            "trace": traceback.format_exc(),
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+
 @app.post("/scan")
 async def scan(
     keywords: str = Form(...),
@@ -260,110 +373,49 @@ async def scan(
         if not kw_list:
             return JSONResponse({"ok": False, "error": "No keywords provided"})
 
-        loop = asyncio.get_event_loop()
-        winners, all_ads = await loop.run_in_executor(
-            _executor,
-            lambda: run_scrape(keywords=kw_list, country=country, scroll_rounds=scroll_rounds)
+        job_id = str(uuid.uuid4())
+        SCAN_JOBS[job_id] = {
+            "status": "queued",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        _executor.submit(
+            run_scan_job,
+            job_id,
+            kw_list,
+            country,
+            scroll_rounds,
+            top_n,
+            min_score,
+            niche_filter,
+            shopify_only,
         )
-
-        domain_to_ads = {}
-        for ad in all_ads:
-            d = ad.get("domain", "")
-            if d not in domain_to_ads:
-                domain_to_ads[d] = []
-            domain_to_ads[d].append(ad)
-
-        result_list = []
-        for w in winners:
-            score = w.get("win_score", 0)
-            label = w.get("label", "weak")
-
-            if score < min_score:
-                continue
-
-            domain = w.get("sample_domain", "")
-            slug = w.get("sample_slug", "")
-            raw_ads = domain_to_ads.get(domain, [])
-            raw_text = raw_ads[0].get("raw_text", "") if raw_ads else ""
-            page = w.get("pages", [""])[0] if w.get("pages") else ""
-
-            product = get_better_product_name(
-                w.get("product", ""),
-                slug,
-                domain,
-                page,
-                raw_text
-            )
-
-            niche = detect_niche(product, domain, slug, page, raw_text)
-            shopify = is_shopify(domain)
-
-            if niche_filter != "all" and niche != niche_filter:
-                continue
-            if shopify_only == "true" and not shopify:
-                continue
-
-            ad_ids = w.get("ad_ids", [])
-            ad_link = f"https://www.facebook.com/ads/library/?id={ad_ids[0]}" if ad_ids else ""
-
-            thumb = ""
-            for ad in raw_ads:
-                if ad.get("thumb_path"):
-                    thumb = ad["thumb_path"]
-                    break
-
-            if not thumb:
-                for ad in raw_ads:
-                    if ad.get("media_url"):
-                        thumb = ad["media_url"]
-                        break
-
-            ad_copy = ""
-            if raw_text:
-                lines = [l.strip() for l in raw_text.split("\n") if l.strip() and len(l.strip()) > 20]
-                for line in lines:
-                    if not any(x in line.lower() for x in ["library id","id thư viện","started running","ngày bắt đầu","được tài trợ","sponsored"]):
-                        ad_copy = line[:150]
-                        break
-
-            result_list.append({
-                "product": product.title(),
-                "label": label,
-                "win_score": score,
-                "ads_count": w.get("ads_count", 0),
-                "max_days": w.get("max_days", 0),
-                "median_days": w.get("median_days", 0),
-                "pages_count": w.get("pages_count", 0),
-                "creative_count": w.get("creative_count", 0),
-                "evidence_points": w.get("evidence_points", 0),
-                "confidence": w.get("confidence", "low"),
-                "sample_url": w.get("sample_url", ""),
-                "sample_domain": domain,
-                "niche": niche,
-                "niche_icon": NICHE_ICONS.get(niche, "🛍️"),
-                "shopify": shopify,
-                "ad_link": ad_link,
-                "thumb": thumb,
-                "ad_copy": ad_copy,
-                "keywords": w.get("keywords", []),
-                "reasons": w.get("reasons", []),
-                "ads_signal": w.get("ads_signal", 0),
-                "durability_signal": w.get("durability_signal", 0),
-                "page_signal": w.get("page_signal", 0),
-                "creative_signal": w.get("creative_signal", 0),
-            })
-
-        result_list = result_list[:top_n]
-
         return JSONResponse({
             "ok": True,
-            "total": len(winners),
-            "winners": result_list,
+            "job_id": job_id,
+            "status": "queued",
         })
 
     except Exception as e:
         import traceback
         return JSONResponse({"ok": False, "error": str(e), "trace": traceback.format_exc()})
+
+@app.get("/scan-status/{job_id}")
+async def scan_status(job_id: str):
+    job = SCAN_JOBS.get(job_id)
+    if not job:
+        return JSONResponse({"ok": False, "error": "Scan job not found"}, status_code=404)
+
+    if job["status"] == "done":
+        return JSONResponse(job["result"])
+    if job["status"] == "error":
+        return JSONResponse({
+            "ok": False,
+            "status": "error",
+            "error": job.get("error", "Scan failed"),
+            "trace": job.get("trace", ""),
+        })
+    return JSONResponse({"ok": True, "status": job["status"]})
 
 @app.post("/export-csv")
 async def export_csv(

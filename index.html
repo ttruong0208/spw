@@ -525,6 +525,52 @@ const statsBar = document.getElementById("statsBar");
 const cardsGrid = document.getElementById("cardsGrid");
 const errorBox = document.getElementById("errorBox");
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function readJsonResponse(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    const message = text.trim() || `${res.status} ${res.statusText}`;
+    throw new Error(message);
+  }
+}
+
+async function waitForScanResult(jobId) {
+  for (let attempt = 0; attempt < 180; attempt++) {
+    await sleep(2000);
+    const res = await fetch(`/scan-status/${jobId}`);
+    const data = await readJsonResponse(res);
+
+    if (!data.ok) return data;
+    if (data.winners) return data;
+
+    cardsGrid.innerHTML = `<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><p>Scanning Facebook Ads Library...</p><p style="font-size:0.8rem;margin-top:8px;color:#666">Status: ${data.status || "running"}</p></div>`;
+  }
+
+  return { ok: false, error: "Scan is still running. Please try again in a few minutes." };
+}
+
+function displayScanData(data) {
+  const winners = data.winners;
+  const winCount = winners.filter(w => w.label === "winner_candidate").length;
+  const watchCount = winners.filter(w => w.label === "watchlist").length;
+  const shopifyCount = winners.filter(w => w.shopify).length;
+
+  statsBar.innerHTML = `
+    <div class="stat"><div class="num">${data.total}</div><div class="lbl">Total Products</div></div>
+    <div class="stat"><div class="num" style="color:#48cfad">${winCount}</div><div class="lbl">🏆 Winners</div></div>
+    <div class="stat"><div class="num" style="color:#f7b731">${watchCount}</div><div class="lbl">👀 Watchlist</div></div>
+    <div class="stat"><div class="num" style="color:#96bf48">${shopifyCount}</div><div class="lbl">🛒 Shopify</div></div>
+    <div class="stat"><div class="num">${winners.length}</div><div class="lbl">Showing</div></div>
+  `;
+
+  lastResults = winners;
+  document.getElementById("exportBtn").style.display = "block";
+  renderCards(sortResults(winners));
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   btn.disabled = true;
@@ -540,28 +586,17 @@ form.addEventListener("submit", async (e) => {
 
   try {
     const res = await fetch("/scan", { method: "POST", body: fd });
-    const data = await res.json();
+    let data = await readJsonResponse(res);
+
+    if (data.ok && data.job_id) {
+      data = await waitForScanResult(data.job_id);
+    }
 
     if (!data.ok) {
       errorBox.innerHTML = `<div class="error">❌ Error: ${data.error}</div>`;
       cardsGrid.innerHTML = "";
     } else {
-      const winners = data.winners;
-      const winCount = winners.filter(w => w.label === "winner_candidate").length;
-      const watchCount = winners.filter(w => w.label === "watchlist").length;
-      const shopifyCount = winners.filter(w => w.shopify).length;
-
-      statsBar.innerHTML = `
-        <div class="stat"><div class="num">${data.total}</div><div class="lbl">Total Products</div></div>
-        <div class="stat"><div class="num" style="color:#48cfad">${winCount}</div><div class="lbl">🏆 Winners</div></div>
-        <div class="stat"><div class="num" style="color:#f7b731">${watchCount}</div><div class="lbl">👀 Watchlist</div></div>
-        <div class="stat"><div class="num" style="color:#96bf48">${shopifyCount}</div><div class="lbl">🛒 Shopify</div></div>
-        <div class="stat"><div class="num">${winners.length}</div><div class="lbl">Showing</div></div>
-      `;
-
-      lastResults = winners;
-      document.getElementById("exportBtn").style.display = "block";
-      renderCards(sortResults(winners));
+      displayScanData(data);
     }
   } catch (err) {
     errorBox.innerHTML = `<div class="error">❌ Network error: ${err.message}</div>`;
@@ -635,17 +670,48 @@ function renderCards(data) {
     : `<div class="empty" style="grid-column:1/-1">😔 No products found. Try different keywords or lower the min score.</div>`;
 }
 
+function csvEscape(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
 document.getElementById("exportBtn").addEventListener("click", () => {
-  const fd = new FormData(form);
-  fetch("/export-csv", { method: "POST", body: fd })
-    .then(r => r.blob())
-    .then(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "winnerspy_results.csv"; a.click();
-      URL.revokeObjectURL(url);
-    });
+  if (!lastResults.length) return;
+
+  const headers = [
+    "Product", "Label", "Win Score", "Ads Count", "Max Days",
+    "Pages Count", "Creatives", "Niche", "Shopify", "Ad Link", "Store URL"
+  ];
+
+  const rows = lastResults.map(w => [
+    w.product,
+    w.label,
+    w.win_score,
+    w.ads_count,
+    w.max_days,
+    w.pages_count,
+    w.creative_count,
+    w.niche,
+    w.shopify ? "Yes" : "No",
+    w.ad_link,
+    w.sample_url
+  ]);
+
+  const csv = [headers, ...rows]
+    .map(row => row.map(csvEscape).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = "winnerspy_results.csv";
+  a.click();
+
+  URL.revokeObjectURL(url);
 });
+
 </script>
 <script>
   const IS_OWNER = localStorage.getItem("is_owner") === "true";
